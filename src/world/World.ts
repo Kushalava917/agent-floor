@@ -949,8 +949,8 @@ export class World {
     if (this.selected) this.agents.get(this.selected)?.character.setSelected(false);
     this.selected = id;
     if (id) {
-      // Looking at a person is a different focus mode than looking at a storey.
-      this.clearFloorFocus();
+      // Looking at a person while a floor is focused: keep the floor ghosting
+      // so upper storeys stay hidden. Only clear floor focus if explicitly requested.
       this.agents.get(id)?.character.setSelected(true);
       this.focusAgent(id);
     }
@@ -1080,13 +1080,13 @@ export class World {
         this.ghostedFloors.add(f.key);
         // A theme change recolours the originals; refresh the clones so the
         // ghost matches instead of keeping the colours it was born with.
-        if (refresh && f.group.userData.ghosted) setGroupGhost(f.group, 1);
-        setGroupGhost(f.group, 0.12);
+        if (refresh && f.group.userData.ghosted) setGroupGhost(f.group, false);
+        setGroupGhost(f.group, true);
       } else if (f.group.userData.ghosted) {
-        setGroupGhost(f.group, 1);
+        setGroupGhost(f.group, false);
       }
     }
-    if (this.pavilion?.group.userData.ghosted) setGroupGhost(this.pavilion.group, 1);
+    if (this.pavilion?.group.userData.ghosted) setGroupGhost(this.pavilion.group, false);
     this.shadowDirty = true;
   }
 
