@@ -1300,7 +1300,6 @@ export class World {
       const right = new Vector3().setFromMatrixColumn(probe.matrixWorld, 0);
       const up = new Vector3().setFromMatrixColumn(probe.matrixWorld, 1);
       target.addScaledVector(right, cx * halfW).addScaledVector(up, cy * halfH);
-      target.y = Math.max(0, target.y);
     }
     return dist;
   }
