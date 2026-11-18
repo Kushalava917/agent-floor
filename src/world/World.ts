@@ -618,6 +618,7 @@ export class World {
         vacant: spec.vacant,
         cafeteria: spec.ground && site.spec.mode !== 'campus',
         padWidth,
+        layoutSeed: spec.building * 1000 + spec.level,
         meta: {
           level: spec.level,
           building: spec.building,

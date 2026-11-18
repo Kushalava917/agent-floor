@@ -33,6 +33,16 @@ export const BUILDING_X0 = -24;
 /** Static sections of the shell are built in fixed-width segments and cached. */
 export const SEGMENT = 13.2;
 
+/** Deterministic 32-bit RNG (mulberry32) for layout variation. */
+function mulberry32(a: number) {
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export interface Seat {
   /** Room-local seat position (where the chair is). */
   x: number;
@@ -95,6 +105,8 @@ export interface FloorOptions {
   cafeteria?: boolean;
   /** Minimum wing length, used to size vacant floors. */
   padWidth?: number;
+  /** Seed for per-floor layout variation (room wing assignments). */
+  layoutSeed?: number;
 }
 
 export interface BuildingLayout {
@@ -190,6 +202,10 @@ export function computeLayout(state: WorldState, book: SeatBook, options: FloorO
   const teams = Object.values(state.teams).sort((a, b) => a.order - b.order);
   const vacant = Boolean(options.vacant);
 
+  // Deterministic RNG from seed for per-floor layout variation
+  const seed = options.layoutSeed ?? 0;
+  const rand = mulberry32(seed);
+
   // --- size every office and place it in a wing
   const wing: Record<'north' | 'south', Draft[]> = { north: [], south: [] };
   const wingLen = { north: 0, south: 0 };
@@ -203,7 +219,8 @@ export function computeLayout(state: WorldState, book: SeatBook, options: FloorO
     const d = OFFICE_D;
     let side = book.wings.get(team.id);
     if (!side) {
-      side = wingLen.north <= wingLen.south ? 'north' : 'south';
+      // Use seed-based randomization for wing assignment instead of simple balancing
+      side = rand() < 0.5 ? 'north' : 'south';
       book.wings.set(team.id, side);
     }
     wingLen[side] += w;
