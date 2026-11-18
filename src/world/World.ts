@@ -149,6 +149,7 @@ export class World {
   private floors: FloorRuntime[] = [];
   private floorByKey = new Map<string, FloorRuntime>();
   private teamFloor = new Map<string, FloorRuntime>();
+  private sourceFloor = new Map<string, FloorRuntime>(); // source -> assigned floor
   private books = new Map<string, SeatBook>();
   private pavilion: FloorRuntime | null = null;
   private site: SitePlan | null = null;
@@ -182,6 +183,63 @@ export class World {
 
   private floorOf(teamId: string) {
     return this.teamFloor.get(teamId);
+  }
+
+  /** FCFS: assign each unique source to a floor (tower) or building (campus). */
+  private buildSourceAssignments(state: WorldState): Map<string, { building: number; level: number }> {
+    const assignments = new Map<string, { building: number; level: number }>();
+    const sources = [...Object.values(state.agents)]
+      .map((a) => a.source)
+      .filter((s): s is string => !!s)
+      .filter((s, i, arr) => arr.indexOf(s) === i); // unique sources in order of appearance
+
+    if (sources.length === 0) return assignments;
+
+    const mode = this.site?.spec.mode ?? (this.officeType === 'auto' ? chooseSpec(this.capacity).mode : this.officeType);
+    const floors = this.floors.length;
+
+    if (mode === 'studio') {
+      // Studio: single floor, all sources share it (rooms per agent)
+      for (const source of sources) {
+        assignments.set(source, { building: 0, level: 0 });
+      }
+    } else if (mode === 'tower') {
+      // Tower: each source gets a floor (up to available floors)
+      // Limit to 3 floors for the main coding agents
+      const towerFloors = Math.min(3, floors);
+      for (let i = 0; i < sources.length && i < towerFloors; i++) {
+        assignments.set(sources[i], { building: 0, level: i });
+      }
+      // Remaining sources share the top floor
+      for (let i = towerFloors; i < sources.length; i++) {
+        assignments.set(sources[i], { building: 0, level: towerFloors - 1 });
+      }
+    } else if (mode === 'campus') {
+      // Campus: each source gets a building (2 floors each)
+      const buildings = Math.floor(floors / 2);
+      for (let i = 0; i < sources.length && i < buildings; i++) {
+        // Assign both ground and level 1 of this building
+        assignments.set(sources[i], { building: i, level: 0 });
+        // We could also track level 1 separately, but for now just assign ground
+      }
+      // Remaining sources share the last building
+      for (let i = buildings; i < sources.length; i++) {
+        assignments.set(sources[i], { building: buildings - 1, level: 0 });
+      }
+    }
+
+    return assignments;
+  }
+
+  /** Get the floor for an agent based on their source (FCFS) or team. */
+  private floorForAgent(agent: Agent): FloorRuntime | undefined {
+    // First try source-based assignment
+    if (agent.source) {
+      const sourceFloor = this.sourceFloor.get(agent.source);
+      if (sourceFloor) return sourceFloor;
+    }
+    // Fall back to team-based assignment
+    return this.teamFloor.get(agent.team);
   }
   private state: WorldState | null = null;
   private theme: ThemeName = 'light';
@@ -455,15 +513,18 @@ export class World {
     const instant = this.instantNext;
     this.instantNext = false;
 
+    // Build source-to-floor assignments (FCFS)
+    const sourceAssignments = this.buildSourceAssignments(state);
+
     const counts = new Map<string, number>();
     for (const a of Object.values(state.agents)) counts.set(a.team, (counts.get(a.team) || 0) + 1);
     const spec = this.officeType === 'auto' ? chooseSpec(this.capacity) : chooseSpecByType(this.officeType, this.capacity);
-    const site = planSite(Object.values(state.teams), counts, this.capacity, spec);
+    const site = planSite(Object.values(state.teams), counts, this.capacity, spec, sourceAssignments);
     this.reconcile(site, state, instant);
 
     // Agents
     for (const agent of Object.values(state.agents)) {
-      const floor = this.floorOf(agent.team);
+      const floor = this.floorForAgent(agent);
       const room = floor?.layout.rooms.get(agent.team);
       const seat = room?.seats.get(agent.id);
       if (!floor || !room || !seat) continue;
@@ -587,7 +648,7 @@ export class World {
         this.scene.add(group);
         this.pavilion = {
           key: 'pavilion',
-          spec: { key: 'pavilion', building: 0, level: 0, ground: true, top: true, capacity: 0, teams: [], vacant: false, pavilion: true },
+          spec: { key: 'pavilion', building: 0, level: 0, ground: true, top: true, capacity: 0, teams: [], vacant: false, pavilion: true, label: 'Cafeteria' },
           group,
           building,
           layout: null as unknown as BuildingLayout,
@@ -610,7 +671,11 @@ export class World {
 
     this.placeBuildings(site);
     this.teamFloor.clear();
-    for (const f of this.floors) for (const id of f.spec.teams) this.teamFloor.set(id, f);
+    this.sourceFloor.clear();
+    for (const f of this.floors) {
+      for (const id of f.spec.teams) this.teamFloor.set(id, f);
+      if (f.spec.assignedSource) this.sourceFloor.set(f.spec.assignedSource, f);
+    }
 
     this.site = site;
     this.siteKey = this.floors.map((f) => f.layout.key).join('~') + (this.pavilion ? '|p' : '');

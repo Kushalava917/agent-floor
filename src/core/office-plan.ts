@@ -43,6 +43,10 @@ export interface FloorPlan {
   /** No live team yet: draw the open-plan desks so the space reads as ready. */
   vacant: boolean;
   pavilion?: boolean;
+  /** Human-readable label: "Floor 1", "Building A Ground", etc. */
+  label: string;
+  /** Which agent source owns this floor/building (for FCFS assignment). */
+  assignedSource?: string;
 }
 
 export interface SitePlan {
@@ -142,7 +146,15 @@ export function buildingLabel(index: number, count: number) {
 }
 
 export function floorLabel(level: number) {
-  return level === 0 ? 'G' : `L${level}`;
+  return level === 0 ? 'Ground' : `Level ${level}`;
+}
+
+export function floorDisplayLabel(building: number, level: number, buildings: number) {
+  if (buildings <= 1) {
+    return level === 0 ? 'Floor 1' : `Floor ${level + 1}`;
+  }
+  const buildingName = String.fromCharCode(65 + building);
+  return level === 0 ? `Building ${buildingName} Ground` : `Building ${buildingName} Level ${level}`;
 }
 
 function emptyBucket(): { teams: string[]; agents: number } {
@@ -153,8 +165,17 @@ function emptyBucket(): { teams: string[]; agents: number } {
  * Pack teams into floors, then pad with vacant floors up to the planned size.
  * The first bucket is always the ground floor, so the building fills from the
  * bottom and the extra capacity reads as expansion space above.
+ * 
+ * For FCFS assignment: each unique agent source (codex, opencode, claude, etc.)
+ * gets their own floor (tower) or building (campus).
  */
-export function planSite(teams: Team[], agentCounts: Map<string, number>, capacity: number, spec?: OfficeSpec): SitePlan {
+export function planSite(
+  teams: Team[], 
+  agentCounts: Map<string, number>, 
+  capacity: number, 
+  spec?: OfficeSpec,
+  sourceAssignments?: Map<string, { building: number; level: number }>
+): SitePlan {
   const chosenSpec = spec ?? chooseSpec(capacity);
   const buckets: { teams: string[]; agents: number }[] = [];
   const ordered = [...teams].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
@@ -189,8 +210,24 @@ export function planSite(teams: Team[], agentCounts: Map<string, number>, capaci
       capacity: perFloor,
       teams: bucket.teams,
       vacant: bucket.teams.length === 0,
+      label: floorDisplayLabel(building, level, campus ? chosenSpec.buildings : 1),
     };
   });
+
+  // Apply FCFS source assignments if provided
+  if (sourceAssignments && sourceAssignments.size > 0) {
+    let assignmentIndex = 0;
+    for (const [source] of sourceAssignments) {
+      if (assignmentIndex < floors.length) {
+        const floor = floors[assignmentIndex];
+        if (floor.vacant || floor.assignedSource === source) {
+          floor.assignedSource = source;
+          floor.vacant = false;
+        }
+      }
+      assignmentIndex++;
+    }
+  }
 
   // Teams may have overflowed the planned shell: relabel building/level from
   // scratch so a growing campus stays coherent.
@@ -201,6 +238,7 @@ export function planSite(teams: Team[], agentCounts: Map<string, number>, capaci
       f.key = `b${f.building}:l${f.level}`;
       f.ground = f.level === 0;
       f.top = f.level === 1;
+      f.label = floorDisplayLabel(f.building, f.level, Math.floor(chosenSpec.floors / 2));
     });
   }
 

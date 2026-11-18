@@ -1,13 +1,13 @@
 import { Material, Mesh, Object3D, Sprite } from 'three';
 
 /**
- * Ghosting: fade a whole storey out of the way without touching the materials
+ * Ghosting: hide a whole storey out of the way without touching the materials
  * it shares with every other storey.
  *
  * Each mesh gets one cloned material per traversal (textures are shared by
  * reference), so a ghosted floor costs no new GPU uploads and restores to the
  * exact material instances it started with. Used when one floor is focused: the
- * storeys above fade back instead of hiding the floor you are looking at.
+ * storeys above disappear instead of hiding the floor you are looking at.
  */
 
 interface GhostMark {
@@ -15,6 +15,7 @@ interface GhostMark {
   clones: Material[];
   castShadow: boolean;
   receiveShadow: boolean;
+  wasVisible: boolean;
 }
 
 const marks = new WeakMap<Object3D, GhostMark>();
@@ -29,11 +30,11 @@ function cloneMaterial(source: Material, cache: Map<Material, Material>): Materi
   return clone;
 }
 
-function fade(material: Material, opacity: number): void {
-  const base = typeof material.userData.ghostBaseOpacity === 'number' ? material.userData.ghostBaseOpacity : 1;
+function hide(material: Material): void {
   material.transparent = true;
-  material.opacity = Math.min(base, opacity);
+  material.opacity = 0;
   material.depthWrite = false;
+  material.visible = false;
 }
 
 function mark(node: Mesh | Sprite, cache: Map<Material, Material>): GhostMark {
@@ -48,11 +49,11 @@ function mark(node: Mesh | Sprite, cache: Map<Material, Material>): GhostMark {
     clones,
     castShadow: node instanceof Mesh ? node.castShadow : false,
     receiveShadow: node instanceof Mesh ? node.receiveShadow : false,
+    wasVisible: node.visible,
   };
   marks.set(node, ghost);
   if (node instanceof Mesh) {
     node.material = Array.isArray(material) ? clones : clones[0];
-    // A translucent storey should not paint a shadow onto the floor below it.
     node.castShadow = false;
     node.receiveShadow = true;
   } else {
@@ -61,9 +62,9 @@ function mark(node: Mesh | Sprite, cache: Map<Material, Material>): GhostMark {
   return ghost;
 }
 
-/** Fade (or restore, at 1) an object tree. Cheap to call again with the same value. */
-export function setGroupGhost(root: Object3D, opacity: number): void {
-  if (opacity >= 0.999) {
+/** Hide (or restore, at true) an object tree. Cheap to call again with the same value. */
+export function setGroupGhost(root: Object3D, hideFlag: boolean): void {
+  if (!hideFlag) {
     restoreGroup(root);
     root.userData.ghosted = false;
     return;
@@ -73,7 +74,8 @@ export function setGroupGhost(root: Object3D, opacity: number): void {
   root.traverse((object) => {
     if (object instanceof Mesh || object instanceof Sprite) {
       const ghost = mark(object, cache);
-      for (const clone of ghost.clones) fade(clone, opacity);
+      for (const clone of ghost.clones) hide(clone);
+      object.visible = false;
     }
   });
   root.userData.ghosted = true;
@@ -91,6 +93,7 @@ export function restoreGroup(root: Object3D): void {
       object.castShadow = ghost.castShadow;
       object.receiveShadow = ghost.receiveShadow;
     }
+    object.visible = ghost.wasVisible;
     for (const clone of ghost.clones) clone.dispose();
     marks.delete(object);
   });
