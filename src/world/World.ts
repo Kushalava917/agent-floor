@@ -1062,13 +1062,16 @@ export class World {
     const o = f.group.position;
     const l = f.layout;
     const c = { x: o.x + (l.x0 + l.x1) / 2, z: o.z + (l.z0 + l.z1) / 2 };
-    const target = new Vector3(c.x, o.y + 0.8, c.z);
-    const dir = new Vector3(0.4, 0.8, 1).normalize();
+    const isGround = f.spec.level === 0;
+    // Ground floor: wider view, higher camera to avoid extreme zoom
+    const target = new Vector3(c.x, o.y + (isGround ? 1.5 : 0.8), c.z);
+    const dir = new Vector3(0.4, isGround ? 0.6 : 0.8, 1).normalize();
+    const margin = isGround ? 0.85 : 0.94;
     const dist = this.fitDistance(
-      [{ x: c.x, z: c.z, w: l.x1 - l.x0, d: l.z1 - l.z0, y0: o.y, y1: o.y + 3.1 }],
+      [{ x: c.x, z: c.z, w: l.x1 - l.x0, d: l.z1 - l.z0, y0: o.y, y1: o.y + (isGround ? 2.5 : 3.1) }],
       target,
       dir,
-      0.94,
+      margin,
     );
     // Ensure camera doesn't end up inside another building (campus mode).
     const position = target.clone().add(dir.multiplyScalar(dist));
